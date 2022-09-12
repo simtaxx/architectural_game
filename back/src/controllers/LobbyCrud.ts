@@ -91,14 +91,14 @@ export class LobbyCrud {
 
   public static async join(req: Request, res: Response) {
     try {
-      const lobbyId = req.body.lobbyId
+      const lobbyId = req.body.lobbyId || req.params.lobbyId
       const currentLobby = LobbyCrud.lobbies[lobbyId]
       const currentLobbyLength = Object.keys(currentLobby.players).length
 
       if (currentLobby && currentLobbyLength < 2) {
         const newPlayer = new IPlayer(
           req.socket.remoteAddress as string,
-          req.body.name,
+          req.body.name || req.body.playerName,
           `player${currentLobbyLength + 1}`
         )
 
@@ -116,7 +116,7 @@ export class LobbyCrud {
 
   public static async quit(req: Request, res: Response) {
     try {
-      const lobbyId = req.params.lobbyId
+      const lobbyId = req.body.lobbyId || req.params.lobbyId
       const currentLobby = LobbyCrud.lobbies[lobbyId]
 
       if (currentLobby) {
