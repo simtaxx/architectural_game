@@ -13,16 +13,23 @@ import { useLocation } from "react-router-dom";
 import { SocketContext } from '@/context/socket';
 import { useTimer } from 'react-timer-hook';
 import * as _ from 'lodash';
+import { TextInput } from "@/components/Input/Text.input";
+import { SubmitButton } from "@/components/Button/Submit.button";
 
 interface LocationState {
   player: IPlayer;
   lobbyId: string
 }
 
+interface IMessage {
+  author: string,
+  content: string
+}
+
 export const Game = () => {
 
   const location = useLocation()
-  if (!location.state) return <div className = "text-xl">Repasse par la home frérot</div>
+  if (!location.state) return <div className="text-xl">Repasse par la home frérot</div>
   const { player: playerState, lobbyId } = location.state as LocationState;
 
   const socket = useContext(SocketContext);
@@ -30,19 +37,20 @@ export const Game = () => {
 
   const [currentPlayer, setCurrentPlayer] = useState<IPlayer>(playerState)
   const [otherPlayer, setOtherPlayer] = useState<undefined | IPlayer>()
+  const [messages, setMessages] = useState<IMessage[]>([])
 
   const expiryTimestamp = new Date();
   expiryTimestamp.setSeconds(expiryTimestamp.getSeconds() + 5);
   const { seconds, isRunning, start, restart } = useTimer({ expiryTimestamp, autoStart: false, onExpire: () => send() });
 
-  const handlePlayer = useCallback((_players: IPlayer[] ) => {
+  const handlePlayer = useCallback((_players: IPlayer[]) => {
     console.log('_players :', _players)
 
     const player = _players.find(player => player.id !== currentPlayer.id)
     setOtherPlayer(player);
   }, []);
 
-  const thewineris = (_players: IPlayer[] | null) => {
+  const handleWinner = (_players: IPlayer[] | null) => {
     console.log('win _players :', _players)
     if (!_players) return
 
@@ -52,6 +60,20 @@ export const Game = () => {
     })
   }
 
+  const handleMessage = (messages: IMessage[]) => setMessages(messages)
+
+  const formRef = useRef<HTMLFormElement | null>(null)
+  const sendMessage = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    socket.emit('send message', {
+      lobbyId,
+      playerName: currentPlayer.name,
+      content: (e.target as HTMLFormElement).currentMessage.value
+    })
+
+    formRef.current?.reset()
+  }
 
   useEffect(() => {
     const { connected } = socket.emit('join room', lobbyId)
@@ -59,13 +81,15 @@ export const Game = () => {
     if (!connected) return
 
     socket.on('current lobby', handlePlayer);
-    socket.on('is starting', startGameTimer )
-    socket.on('winner', thewineris )
+    socket.on('is starting', startGameTimer)
+    socket.on('winner', handleWinner)
+    socket.on('current lobby messages', handleMessage)
 
     return () => {
       socket.off('current lobby', handlePlayer);
       socket.off('is starting')
       socket.off('winner')
+      socket.off('current lobby messages')
     };
   }, [socket, handlePlayer]);
 
@@ -91,56 +115,82 @@ export const Game = () => {
     })
   }
 
+  const playersIn = currentPlayer && otherPlayer
+
   return (
     <>
-      {(currentPlayer === undefined) ? 
-      <>
-        <OverLimitImg /><br/>Vous ne pouvez pas rejoindre cette room
-      </>:      
-      <>
-        <Heading className="text-xl">
-            {currentPlayer && !otherPlayer && <div onClick={() => { navigator.clipboard.writeText(lobbyId) }} className="cursor-pointer">Clique pour copier le lien !</div>}
-            { (currentPlayer && otherPlayer) &&
-                (!isRunning
+      {(currentPlayer === undefined) ?
+        <>
+          <OverLimitImg /><br />Vous ne pouvez pas rejoindre cette room
+        </>
+        :
+        <>
+          <Heading className="text-xl">
+            {!otherPlayer && <div onClick={() => { navigator.clipboard.writeText(lobbyId) }} className="cursor-pointer">Clique pour copier le lien !</div>}
+            {playersIn &&
+              (!isRunning
                 ? currentPlayer.id === "player1"
-                    ? <div className="text-teal-300 underline cursor-pointer" onClick={startGame}>Lancez une partie !</div>
-                    : <div>C'est au premier joueur de lancer !</div>
+                  ? <div className="text-teal-300 underline cursor-pointer" onClick={startGame}>Lancez une partie !</div>
+                  : <div>C'est au premier joueur de lancer !</div>
                 : <div>Choisissez un élément: ( {seconds} s)</div>
-                )
+              )
             }
-        </Heading>
-        <GameContainer className="flex flex-row">
+          </Heading>
+          <GameContainer className="flex flex-row">
             <GameColumn>
-            <PlayerGame player={currentPlayer}/>
+              <PlayerGame player={currentPlayer} />
             </GameColumn>
             <GameColumn column="half" className="flex justify-center">
-            {
-                (currentPlayer && otherPlayer)
-                ? (
+              {
+                playersIn
+                  ? (
                     isRunning
-                    ?
-                    <ChooseGame onClick={getElement} />
-                    : (currentPlayer.currentChoice && otherPlayer.currentChoice)
+                      ?
+                      <ChooseGame onClick={getElement} />
+                      : (currentPlayer.currentChoice && otherPlayer.currentChoice)
                         ? <ArenaGame currentPlayer={currentPlayer} otherPlayer={otherPlayer} />
                         : <WaitingImg />
-                    )
-                : <WaitingImg />
-            }
+                  )
+                  : <WaitingImg />
+              }
             </GameColumn>
             <GameColumn>
-            <PlayerGame player={otherPlayer} />
+              <PlayerGame player={otherPlayer} />
             </GameColumn>
-        </GameContainer>
-        <ButtonContainer>
+          </GameContainer>
+          <ButtonContainer>
             <ButtonLink
-            link="/"
-            label="Quitter la partie"
-            color="gray"
-            opacity="00"
-            onClick={() => socket.emit('leave room', { lobbyId, playerId: currentPlayer.id }) }
+              link="/"
+              label="Quitter la partie"
+              color="gray"
+              opacity="00"
+              onClick={() => socket.emit('leave room', { lobbyId, playerId: currentPlayer.id })}
             />
-        </ButtonContainer>
-        </> 
+          </ButtonContainer>
+
+          <form ref={formRef} className="flex flex-col items-center justify-center w-screen h-96 text-gray-800 p-10" onSubmit={sendMessage}>
+            <div className="flex flex-col flex-grow w-full max-w-xl bg-zinc-700 shadow-xl rounded-lg overflow-hidden">
+              <div className="flex flex-col flex-grow h-0 p-4 overflow-auto space-y-4">
+                {messages.map((message, index) => (
+                  <div key={index} className="flex w-full mt-2 space-x-3 max-w-xs">
+                    <div>
+                      <p className="text-sm font-bold text-gray-300 leading-none mb-2">{message.author}</p>
+                      <div className="bg-gray-300 p-3 rounded-r-lg rounded-bl-lg">
+                        <p className="text-md">{message.content}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-gray-300 p-4">
+                <input className="flex items-center h-10 w-full rounded px-3 text-sm" type="text" name="currentMessage" placeholder="Type your message…"  />
+                <input className="mt-5 w-full" type="submit" value="Envoyer!" />
+              </div>
+            </div>
+
+          </form>
+        </>
       }
     </>
   );
@@ -157,4 +207,4 @@ const ButtonContainer = styled.div`
   text-align: center;
 `;
 
-const GameContainer= styled.div``;
+const GameContainer = styled.div``;
